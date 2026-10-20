@@ -19,7 +19,8 @@ final class ClaudeChat {
         var canUndo = false
 
         var prose: String { TranscriptExchange.prose(text) }
-        var lineCount: Int { TranscriptExchange.parse(text).count }
+        var lineCount: Int { TranscriptExchange.lineCount(text) }
+        var vocabulary: [String] { role == .assistant ? TranscriptExchange.vocabulary(text) : [] }
     }
 
     enum Setup: Equatable {
@@ -34,6 +35,8 @@ final class ClaudeChat {
     private(set) var messages: [Message] = []
     private(set) var setup: Setup = .unknown
     private(set) var isRunning = false
+    /// Set while the video is transcribed again with Claude's vocabulary; proofreads when done.
+    private(set) var isRetranscribing = false
     var draft = ""
 
     @ObservationIgnored private var binary: URL?
@@ -68,8 +71,36 @@ final class ClaudeChat {
     func proofreadAll() {
         guard let item, item.hasCaptions else { return }
         newChat()
-        let prompt = TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier)
-        send(prompt, title: "Proofread all \(item.captions.count) captions", lines: TranscriptExchange.lines(for: item.captions))
+        let prompt = TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier, grouping: item.style.grouping)
+        send(prompt, title: "Proofread all \(item.captions.count) captions", lines: TranscriptExchange.lines(for: item.captions, wordTimes: true))
+    }
+
+    /// Adds Claude's suggested terms to the video's vocabulary and transcribes it again, so the
+    /// speech engine itself hears the names right; the new captions are proofread when ready.
+    func transcribeAgain(with terms: [String], queue: CaptionQueue) {
+        guard let item, !terms.isEmpty else { return }
+        var vocabulary = item.vocabulary
+        for term in terms where !vocabulary.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame }) {
+            vocabulary.append(term)
+        }
+        item.vocabulary = vocabulary
+        isRetranscribing = true
+        messages.append(Message(role: .notice, text: "Transcribing again, listening for: \(terms.joined(separator: ", ")). Proofreading follows."))
+        queue.transcribeAgain(item)
+    }
+
+    /// Called when the video's status changes; finishes a transcribe-again round.
+    func statusChanged(to status: CaptionItem.Status) {
+        guard isRetranscribing else { return }
+        switch status {
+        case .ready:
+            isRetranscribing = false
+            proofreadAll()
+        case .failed, .waiting:
+            isRetranscribing = false
+        default:
+            break
+        }
     }
 
     /// Sends what the user typed. The captions go along when Claude has not seen them as they are now.
@@ -77,7 +108,7 @@ final class ClaudeChat {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let item else { return }
         draft = ""
-        let lines = TranscriptExchange.lines(for: item.captions)
+        let lines = TranscriptExchange.lines(for: item.captions, wordTimes: true)
         var prompt = text
         if lines != sentLines, item.hasCaptions {
             let header = sessionID == nil ? "The captions:" : "The captions have changed since; here they are now:"
@@ -106,7 +137,7 @@ final class ClaudeChat {
         sentLines = lines
         isRunning = true
         let stream = ClaudeCode.send(prompt, resume: sessionID, model: model,
-                                     systemPrompt: Self.systemPrompt(localeIdentifier: item.localeIdentifier), binary: binary)
+                                     systemPrompt: Self.systemPrompt(localeIdentifier: item.localeIdentifier, grouping: item.style.grouping), binary: binary)
         task = Task { [weak self] in
             do {
                 for try await event in stream {
@@ -157,7 +188,7 @@ final class ClaudeChat {
             messages[index].canUndo = result.changed > 0
             // Claude's own reply is now what the captions say. If lines were deleted the numbers
             // moved, so send the captions again with the next message.
-            sentLines = item.captions.count == countBefore ? TranscriptExchange.lines(for: item.captions) : nil
+            sentLines = item.captions.count == countBefore && !result.restructured ? TranscriptExchange.lines(for: item.captions, wordTimes: true) : nil
         } catch {
             messages.append(Message(role: .notice, text: error.localizedDescription))
         }
@@ -176,20 +207,20 @@ final class ClaudeChat {
         change(&messages[index])
     }
 
-    static func systemPrompt(localeIdentifier: String) -> String {
-        let language = Locale(identifier: "en").localizedString(forIdentifier: localeIdentifier) ?? localeIdentifier
+    static func systemPrompt(localeIdentifier: String, grouping: CaptionGrouping) -> String {
+        let language = TranscriptExchange.languageName(localeIdentifier)
         return """
-        You are the proofreader built into Captioner, a Mac app that burns captions into videos. The \
-        captions come from on-device speech recognition in \(language). They are given as lines like \
-        `[12] 0:05.3 – 0:07.1 text`: the caption number, its time range, and its words.
+        You are the caption editor built into Captioner, a Mac app that burns captions into videos. \
+        The captions come from Apple's on-device speech recognition in \(language). You get them as \
+        lines `[n] start – end words`, where every word carries its spoken time as {start-end} in \
+        seconds, marked `?` when the recognizer was unsure. You cannot hear the audio: the word \
+        times are how you see pauses and pace. Whatever you put in caption lines is applied to the \
+        video at once, and the user can undo it.
 
-        Whenever you change captions, put the changed lines in exactly that format inside one code \
-        block, with their numbers and timestamps unchanged. The app applies them to the video right \
-        away. Lines you leave out stay as they are; a line with no text deletes that caption. Never \
-        renumber, merge or split lines, and keep each word on the line it is on.
+        \(TranscriptExchange.formatRules(grouping))
 
-        Outside the code block, keep it short, and answer in the language the user writes in. If the \
-        user only asks a question, answer it without a code block.
+        Outside the code block keep it short, and answer in the language the user writes in. If the \
+        user only asks a question, answer without a code block.
         """
     }
 }

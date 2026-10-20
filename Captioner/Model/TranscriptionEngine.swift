@@ -19,11 +19,12 @@ nonisolated enum TranscriptionEvent: Sendable {
 /// Runs Apple's on-device SpeechAnalyzer over a media file and streams the results.
 nonisolated enum TranscriptionEngine {
     /// - Parameter maskProfanity: asks the engine for its etiquette replacements ("f***") instead of the words themselves.
-    static func transcribe(url: URL, locale: Locale, maskProfanity: Bool) -> AsyncThrowingStream<TranscriptionEvent, Error> {
+    /// - Parameter vocabulary: names and terms to listen for, so the engine spells them as given.
+    static func transcribe(url: URL, locale: Locale, maskProfanity: Bool, vocabulary: [String] = []) -> AsyncThrowingStream<TranscriptionEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 do {
-                    try await run(url: url, locale: locale, maskProfanity: maskProfanity) { continuation.yield($0) }
+                    try await run(url: url, locale: locale, maskProfanity: maskProfanity, vocabulary: vocabulary) { continuation.yield($0) }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -43,7 +44,7 @@ nonisolated enum TranscriptionEngine {
         return await DictationTranscriber.supportedLocale(equivalentTo: locale)
     }
 
-    private static func run(url: URL, locale: Locale, maskProfanity: Bool, emit: @escaping @Sendable (TranscriptionEvent) -> Void) async throws {
+    private static func run(url: URL, locale: Locale, maskProfanity: Bool, vocabulary: [String], emit: @escaping @Sendable (TranscriptionEvent) -> Void) async throws {
         emit(.status("Reading media…"))
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
@@ -57,6 +58,11 @@ nonisolated enum TranscriptionEngine {
 
         emit(.status("Preparing…"))
         let analyzer = SpeechAnalyzer(modules: [transcriber.module])
+        if !vocabulary.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = vocabulary
+            try await analyzer.setContext(context)
+        }
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber.module]) else {
             throw TranscriptionError.noAudioFormat
         }
@@ -118,7 +124,7 @@ nonisolated enum TranscriptionEngine {
             let module = SpeechTranscriber(locale: resolved,
                                            transcriptionOptions: maskProfanity ? [.etiquetteReplacements] : [],
                                            reportingOptions: [.volatileResults],
-                                           attributeOptions: [.audioTimeRange])
+                                           attributeOptions: [.audioTimeRange, .transcriptionConfidence])
             return (.speech(module), resolved)
         }
         if let resolved = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
@@ -128,7 +134,7 @@ nonisolated enum TranscriptionEngine {
                                               contentHints: [],
                                               transcriptionOptions: options,
                                               reportingOptions: [.volatileResults],
-                                              attributeOptions: [.audioTimeRange])
+                                              attributeOptions: [.audioTimeRange, .transcriptionConfidence])
             return (.dictation(module), resolved)
         }
         return nil
@@ -166,11 +172,12 @@ nonisolated enum TranscriptionEngine {
     /// Turns a finalized attributed result into words with times. Runs carry per-token time ranges;
     /// punctuation and spacing runs have none and are folded into the neighbouring word.
     static func words(from text: AttributedString) -> [TranscriptWord] {
-        var characters: [(Character, CMTimeRange?)] = []
+        var characters: [(Character, CMTimeRange?, Double?)] = []
         for run in text.runs {
             let range = run.audioTimeRange
+            let confidence = run.transcriptionConfidence
             for character in text[run.range].characters {
-                characters.append((character, range))
+                characters.append((character, range, confidence))
             }
         }
 
@@ -179,11 +186,12 @@ nonisolated enum TranscriptionEngine {
         var token = ""
         var tokenStart: TimeInterval?
         var tokenEnd: TimeInterval?
+        var tokenConfidence: Double?
 
         func flushToken() {
             guard !token.isEmpty else { return }
             if let start = tokenStart, let end = tokenEnd {
-                words.append(TranscriptWord(text: pendingPrefix + token, start: start, end: max(end, start)))
+                words.append(TranscriptWord(text: pendingPrefix + token, start: start, end: max(end, start), confidence: tokenConfidence))
                 pendingPrefix = ""
             } else if !words.isEmpty {
                 words[words.count - 1].text += token
@@ -193,14 +201,17 @@ nonisolated enum TranscriptionEngine {
             token = ""
             tokenStart = nil
             tokenEnd = nil
+            tokenConfidence = nil
         }
 
-        for (character, range) in characters {
+        for (character, range, confidence) in characters {
             if character.isWhitespace || character.isNewline {
                 flushToken()
                 continue
             }
             token.append(character)
+            // A word is as sure as its least sure piece.
+            if let confidence { tokenConfidence = min(tokenConfidence ?? confidence, confidence) }
             if let range, range.start.isNumeric, range.duration.isNumeric {
                 let start = range.start.seconds
                 let end = range.end.seconds

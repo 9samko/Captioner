@@ -5,6 +5,8 @@ nonisolated struct TranscriptWord: Codable, Hashable, Sendable {
     var text: String
     var start: TimeInterval
     var end: TimeInterval
+    /// How sure the speech engine was of the word, 0…1, when it said.
+    var confidence: Double? = nil
 
     var duration: TimeInterval { max(0, end - start) }
 }
@@ -60,7 +62,8 @@ nonisolated struct Caption: Codable, Hashable, Identifiable, Sendable {
         let moved = words.map { word in
             TranscriptWord(text: word.text,
                            start: newStart + (word.start - start) * scale,
-                           end: newStart + (word.end - start) * scale)
+                           end: newStart + (word.end - start) * scale,
+                           confidence: word.confidence)
         }
         return Caption(id: id, words: moved)
     }

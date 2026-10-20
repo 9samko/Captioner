@@ -42,6 +42,15 @@ video file with the captions burned in.
   sends every caption; the corrected lines are applied as they arrive (with Undo), and you can keep
   asking for changes in plain words. Needs Claude Code installed and logged in (`claude auth login`);
   the panel offers both. Tools, MCP servers and settings files are switched off for these chats.
+- **Claude and the speech engine together**: the engine reports how sure it is of each word, and
+  Claude gets every word's timing with the unsure ones marked. Claude fixes the text and re-cuts
+  the captions (breaks, merges, timing); the app lines Claude's words back up with the recognized
+  ones, so timing stays exact. Claude can also name words the engine misheard; "Transcribe Again
+  Listening for These" runs the engine again with them as vocabulary, then proofreads again. The
+  Vocabulary field in the inspector takes your own names and terms too.
+- **Saving**: work is autosaved and restored at the next launch. File › Save Project (⌘S) writes a
+  `.captioner` file (captions, transcript, style, vocabulary); Open Project (⇧⌘O) or a double-click
+  brings it back. Keep it next to its video and it opens on another Mac too.
 - The preview plays the video through the same compositor the export uses, so what you see is
   what you get. ⌥Space plays and pauses, ⌥⌘← / ⌥⌘→ skip 5 s.
 - **Export** (⌘E, or ⇧⌘E for every video) writes `<name> Captioned.mp4` next to the original

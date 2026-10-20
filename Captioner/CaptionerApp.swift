@@ -44,7 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        CaptionQueue.shared.autosave()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CaptionQueue.shared.restoreSession()
         #if DEBUG
         // Development aid: CAPTIONER_DEBUG_OPEN=/path/a.mp4:/path/b.mp4 adds videos at launch without the Finder.
         if let list = ProcessInfo.processInfo.environment["CAPTIONER_DEBUG_OPEN"] {

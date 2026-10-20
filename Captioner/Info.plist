@@ -16,6 +16,38 @@
 				<string>public.movie</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Captioner Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.github.9samko.captioner.project</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.9samko.captioner.project</string>
+			<key>UTTypeDescription</key>
+			<string>Captioner Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>captioner</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Captioner listens to the speech in your videos to generate captions, entirely on this Mac.</string>

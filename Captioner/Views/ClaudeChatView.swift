@@ -43,6 +43,7 @@ struct ClaudeChatView: View {
             }
         }
         .task { if chat.setup == .unknown { await chat.checkSetup() } }
+        .onChange(of: item.status) { _, status in chat.statusChanged(to: status) }
     }
 
     private var header: some View {
@@ -59,7 +60,7 @@ struct ClaudeChatView: View {
             .help("Which Claude model answers")
             Menu {
                 Button("Proofread All Captions") { chat.proofreadAll() }
-                    .disabled(!item.hasCaptions || chat.isRunning)
+                    .disabled(!item.hasCaptions || chat.isRunning || chat.isRetranscribing)
                 Button("New Chat") { chat.newChat() }
                     .disabled(chat.messages.isEmpty)
                 Divider()
@@ -80,7 +81,7 @@ struct ClaudeChatView: View {
         ContentUnavailableView {
             Label("Proofread with Claude", systemImage: "text.badge.checkmark")
         } description: {
-            Text("Claude fixes words, diacritics, capitals, punctuation and sentences, and the captions keep their timing. Afterwards, ask for changes in your own words.")
+            Text("Claude fixes words, diacritics, capitals and punctuation, re-cuts the captions into readable phrases using every word's timing, and focuses on the words the speech engine was unsure of. It can also hand names back to the engine for a second, sharper transcription. Afterwards, ask for changes in your own words.")
         } actions: {
             Button("Proofread All Captions") { chat.proofreadAll() }
                 .buttonStyle(.borderedProminent)
@@ -112,7 +113,7 @@ struct ClaudeChatView: View {
                 .lineLimit(1...6)
                 .focused($inputFocused)
                 .onSubmit { chat.sendDraft() }
-                .disabled(chat.isRunning)
+                .disabled(chat.isRunning || chat.isRetranscribing)
             if chat.isRunning {
                 Button { chat.stop() } label: {
                     Image(systemName: "stop.circle.fill").font(.title2)
@@ -136,6 +137,7 @@ struct ClaudeChatView: View {
 private struct MessageView: View {
     let message: ClaudeChat.Message
     let chat: ClaudeChat
+    @Environment(CaptionQueue.self) private var queue
     @State private var showLines = false
 
     var body: some View {
@@ -178,6 +180,19 @@ private struct MessageView: View {
                         .font(.callout.weight(.medium))
                 }
                 if !message.isStreaming { applyRow }
+            }
+            let vocabulary = message.vocabulary
+            if !vocabulary.isEmpty, !message.isStreaming {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Words the speech engine misheard: \(vocabulary.joined(separator: ", "))")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button("Transcribe Again Listening for These") { chat.transcribeAgain(with: vocabulary, queue: queue) }
+                        .controlSize(.small)
+                        .disabled(chat.isRunning || chat.isRetranscribing)
+                        .help("The on-device engine hears the audio again knowing these words, then Claude proofreads the new captions")
+                }
             }
             if message.isStreaming {
                 ProgressView().controlSize(.small)

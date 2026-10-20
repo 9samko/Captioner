@@ -72,6 +72,10 @@ final class CaptionItem: Identifiable {
     /// The captions and transcript as they were before the last pasted corrections, for undoing them.
     private(set) var beforeCorrections: (captions: [Caption], rawWords: [TranscriptWord], hasEdits: Bool)?
     var exportProgress: Double = 0
+    /// Names and terms the speech engine listens for, one per line; Claude can suggest them.
+    var vocabulary: [String] = []
+    /// The `.captioner` file this video was last saved to or opened from.
+    var projectURL: URL?
     var exportedURL: URL?
 
     /// Called whenever the rendered captions change; the preview uses it to repaint a paused frame.
@@ -117,7 +121,8 @@ final class CaptionItem: Identifiable {
             let info = try await CaptionComposition.inspect(asset)
             self.info = info
             composition = CaptionComposition.make(info: info, overlay: overlay)
-            status = .waiting
+            // Restored or opened captions are ready as they are; only new videos are transcribed.
+            status = hasCaptions ? .ready : .waiting
             Self.log.notice("Loaded \(self.name, privacy: .public): \(Int(info.renderSize.width))×\(Int(info.renderSize.height)) in \(Date().timeIntervalSince(started), format: .fixed(precision: 2))s")
         } catch {
             status = .failed(error.localizedDescription)
@@ -139,11 +144,47 @@ final class CaptionItem: Identifiable {
         return CaptionComposition.make(info: info, overlay: CaptionOverlay(snapshot: snapshot))
     }
 
+    // MARK: - Saving
+
+    /// The item's work, ready to save. `projectURL` sets the video's path relative to that file.
+    func project(savingTo projectURL: URL? = nil) -> CaptionProject {
+        let target = projectURL ?? self.projectURL
+        var subtitlePath: String?
+        if case .subtitles(let url) = source { subtitlePath = url.path }
+        return CaptionProject(videoPath: url.path,
+                              videoBookmark: try? url.bookmarkData(),
+                              videoRelativePath: target.map { CaptionProject.relativePath(of: url, from: $0) },
+                              subtitlePath: subtitlePath,
+                              projectPath: target?.path,
+                              localeIdentifier: localeIdentifier,
+                              captions: captions,
+                              rawWords: rawWords,
+                              style: style,
+                              placement: placement,
+                              textOptions: textOptions,
+                              hasEdits: hasEdits,
+                              vocabulary: vocabulary)
+    }
+
+    /// Takes back saved work. Call before `load()`, so the captions are kept rather than generated.
+    func restore(from project: CaptionProject) {
+        localeIdentifier = project.localeIdentifier
+        if let path = project.subtitlePath { source = .subtitles(URL(fileURLWithPath: path)) }
+        rawWords = project.rawWords
+        textOptions = project.textOptions
+        placement = project.placement
+        style = project.style
+        captions = project.captions
+        hasEdits = project.hasEdits
+        vocabulary = project.vocabulary ?? []
+        projectURL = project.projectPath.map { URL(fileURLWithPath: $0) }
+    }
+
     // MARK: - Generating captions
 
     func startTranscription(completion: @escaping @MainActor () -> Void) {
         job?.cancel()
-        let job = TranscriptionJob(locale: locale, maskProfanity: !textOptions.showCurseWords)
+        let job = TranscriptionJob(locale: locale, maskProfanity: !textOptions.showCurseWords, vocabulary: vocabulary)
         self.job = job
         status = .transcribing
         let started = Date()
@@ -235,7 +276,8 @@ final class CaptionItem: Identifiable {
         beforeCorrections = (captions, rawWords, hasEdits)
         captions = CaptionBuilder.normalized(result.captions)
         rawWords = captions.flatMap(\.words)
-        hasEdits = false
+        // A restructured list has its own breaks; keep them when the style changes.
+        hasEdits = result.restructured
         return result
     }
 

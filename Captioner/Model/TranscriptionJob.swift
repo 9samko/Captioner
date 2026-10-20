@@ -21,6 +21,7 @@ final class TranscriptionJob {
     private(set) var volatileText = ""
     let locale: Locale
     let maskProfanity: Bool
+    let vocabulary: [String]
 
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -37,16 +38,17 @@ final class TranscriptionJob {
         return volatileText.isEmpty ? tail : tail + " " + volatileText
     }
 
-    init(locale: Locale, maskProfanity: Bool) {
+    init(locale: Locale, maskProfanity: Bool, vocabulary: [String] = []) {
         self.locale = locale
         self.maskProfanity = maskProfanity
+        self.vocabulary = vocabulary
     }
 
     func start(url: URL, completion: @escaping @MainActor ([TranscriptWord]) -> Void) {
         task = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await event in TranscriptionEngine.transcribe(url: url, locale: locale, maskProfanity: maskProfanity) {
+                for try await event in TranscriptionEngine.transcribe(url: url, locale: locale, maskProfanity: maskProfanity, vocabulary: vocabulary) {
                     switch event {
                     case .status(let text):
                         status = text

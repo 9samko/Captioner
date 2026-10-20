@@ -19,6 +19,17 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Add Videos…") { queue.openPanel() }
                 .keyboardShortcut("o")
+            Button("Open Project…") { queue.openProjectPanel() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+        }
+
+        CommandGroup(before: .saveItem) {
+            Button("Save Project") { if let selected { queue.saveProject(selected) } }
+                .keyboardShortcut("s")
+                .disabled(!(selected?.hasCaptions ?? false))
+            Button("Save Project As…") { if let selected { queue.saveProject(selected, choosingLocation: true) } }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(!(selected?.hasCaptions ?? false))
         }
 
         CommandGroup(after: .saveItem) {

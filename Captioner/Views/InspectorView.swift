@@ -55,6 +55,7 @@ struct InspectorView: View {
                 .fixedSize()
             }
             LanguagePicker(selection: $item.localeIdentifier, label: "Spoken language")
+            VocabularyField(item: item)
             HStack {
                 if item.isTranscribing {
                     ProgressView()
@@ -72,6 +73,34 @@ struct InspectorView: View {
                     .disabled(item.status == .loading || item.status == .exporting)
                 }
             }
+        }
+    }
+
+    /// Names and terms for the speech engine, one per line or separated by commas.
+    private struct VocabularyField: View {
+        @Bindable var item: CaptionItem
+        @State private var text = ""
+        @FocusState private var focused: Bool
+
+        var body: some View {
+            LabeledContent {
+                TextField("Names, brands, terms", text: $text, axis: .vertical)
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+            } label: {
+                Text("Vocabulary")
+                    .help("Words the speech engine should listen for, used the next time captions are generated. Claude can suggest them.")
+            }
+            .onAppear { text = item.vocabulary.joined(separator: ", ") }
+            .onChange(of: item.vocabulary) { _, new in if !focused { text = new.joined(separator: ", ") } }
+        }
+
+        private func commit() {
+            item.vocabulary = text.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isNewline })
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
         }
     }
 

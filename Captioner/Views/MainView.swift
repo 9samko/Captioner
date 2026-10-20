@@ -54,9 +54,9 @@ struct MainView: View {
         }
         .toolbar { toolbarContent }
         .dropDestination(for: URL.self) { urls, _ in
-            let videos = urls.filter(CaptionQueue.isVideo)
-            guard !videos.isEmpty else { return false }
-            queue.add(videos)
+            let accepted = urls.filter { CaptionQueue.isVideo($0) || $0.pathExtension.lowercased() == CaptionProject.fileExtension }
+            guard !accepted.isEmpty else { return false }
+            queue.add(accepted)
             return true
         } isTargeted: { dropTargeted = $0 }
         .overlay {
