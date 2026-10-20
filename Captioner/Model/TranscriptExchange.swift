@@ -86,8 +86,15 @@ nonisolated enum TranscriptExchange {
     }
 
     /// Everything in one message, for pasting into a chat outside the app.
-    static func prompt(for captions: [Caption], localeIdentifier: String, grouping: CaptionGrouping) -> String {
-        "\(task(localeIdentifier: localeIdentifier))\n\n\(formatRules(grouping))\n\n\(lines(for: captions, compact: true))"
+    static func prompt(for captions: [Caption], localeIdentifier: String, grouping: CaptionGrouping, instructions: String = "") -> String {
+        "\(task(localeIdentifier: localeIdentifier))\n\n\(formatRules(grouping))\(styleSection(instructions))\n\n\(lines(for: captions, compact: true))"
+    }
+
+    /// The user's own style rules, if any, set apart so they win over the defaults.
+    static func styleSection(_ instructions: String) -> String {
+        let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return "\n\nThe user's style instructions. Follow them; they override the defaults above, but not the reply format:\n\(trimmed)"
     }
 
     // MARK: - Reading

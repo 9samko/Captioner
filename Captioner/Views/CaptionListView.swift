@@ -109,7 +109,8 @@ struct ProofreadMenu: View {
 enum TranscriptClipboard {
     /// The numbered lines with proofreading instructions in front.
     static func copyPrompt(_ item: CaptionItem) {
-        copy(TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier, grouping: item.style.grouping))
+        copy(TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier, grouping: item.style.grouping,
+                                        instructions: ClaudeChat.instructions))
     }
 
     static func copyLines(_ item: CaptionItem) {

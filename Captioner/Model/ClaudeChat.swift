@@ -30,6 +30,7 @@ final class ClaudeChat {
     static let models: [(id: String, name: String)] = [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
     static let modelKey = "claudeModel"
     static let autoApplyKey = "claudeAutoApply"
+    static let instructionsKey = "claudeInstructions"
 
     weak var item: CaptionItem?
     private(set) var messages: [Message] = []
@@ -47,6 +48,8 @@ final class ClaudeChat {
 
     var model: String { UserDefaults.standard.string(forKey: Self.modelKey) ?? "opus" }
     var autoApply: Bool { UserDefaults.standard.object(forKey: Self.autoApplyKey) as? Bool ?? true }
+    /// The user's style instructions, sent with every message so edits to them apply at once.
+    static var instructions: String { UserDefaults.standard.string(forKey: instructionsKey) ?? "" }
 
     // MARK: - Setup
 
@@ -219,7 +222,7 @@ final class ClaudeChat {
         You can't hear the audio; start times and pauses show the pacing. Caption lines you reply \
         with are applied to the video at once (the user can undo).
 
-        \(TranscriptExchange.formatRules(grouping))
+        \(TranscriptExchange.formatRules(grouping))\(TranscriptExchange.styleSection(instructions))
 
         Outside the code block be brief, in the user's language. Answer plain questions without a \
         code block.

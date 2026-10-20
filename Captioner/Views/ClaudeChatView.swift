@@ -5,6 +5,8 @@ struct ClaudeChatView: View {
     let item: CaptionItem
     @AppStorage(ClaudeChat.modelKey) private var model = "opus"
     @AppStorage(ClaudeChat.autoApplyKey) private var autoApply = true
+    @AppStorage(ClaudeChat.instructionsKey) private var instructions = ""
+    @State private var showInstructions = false
     @FocusState private var inputFocused: Bool
 
     private var chat: ClaudeChat { item.claude }
@@ -43,6 +45,7 @@ struct ClaudeChatView: View {
             }
         }
         .task { if chat.setup == .unknown { await chat.checkSetup() } }
+        .sheet(isPresented: $showInstructions) { ClaudeInstructionsView() }
         .onChange(of: item.status) { _, status in chat.statusChanged(to: status) }
     }
 
@@ -51,6 +54,12 @@ struct ClaudeChatView: View {
             Label("Claude", systemImage: "sparkles")
                 .font(.headline)
             Spacer()
+            Button { showInstructions = true } label: {
+                Image(systemName: "text.quote")
+                    .foregroundStyle(instructions.isEmpty ? Color.secondary : Color.accentColor)
+            }
+            .buttonStyle(.borderless)
+            .help(instructions.isEmpty ? "Style instructions for Claude" : "Style instructions for Claude (on)")
             Picker("Model", selection: $model) {
                 ForEach(ClaudeChat.models, id: \.id) { Text($0.name).tag($0.id) }
             }
@@ -64,6 +73,7 @@ struct ClaudeChatView: View {
                 Button("New Chat") { chat.newChat() }
                     .disabled(chat.messages.isEmpty)
                 Divider()
+                Button("Style Instructions…") { showInstructions = true }
                 Toggle("Apply Corrections Automatically", isOn: $autoApply)
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -219,5 +229,103 @@ private struct MessageView: View {
                     .buttonStyle(.borderedProminent)
             }
         }
+    }
+}
+
+/// The user's own rules for Claude, added to every request.
+struct ClaudeInstructionsView: View {
+    @AppStorage(ClaudeChat.instructionsKey) private var instructions = ""
+    @Environment(\.dismiss) private var dismiss
+
+    /// One-click starting points; the user can write anything.
+    private static let examples = [
+        "No period at the end of a caption; keep ? and !",
+        "Write numbers as digits",
+        "Keep the speaker's slang and informal words",
+        "Use standard written Slovak (spisovná slovenčina)",
+        "Remove filler words (ehm, eee, akože, proste)",
+        "Keep filler words; transcribe exactly what was said",
+        "Captions of 2–3 words, punchy, for short vertical videos",
+        "Split long sentences into short captions for reading at a glance",
+        "Brand names: ",
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Style Instructions for Claude")
+                .font(.title3.weight(.semibold))
+            Text("Your own rules, sent with every request in the Claude panel and in Copy for Claude. Write them in any language. They override the defaults, but Claude still answers in the format the app reads.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $instructions)
+                .font(.body)
+                .frame(minHeight: 160)
+                .padding(4)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            Text("Add:")
+                .font(.callout.weight(.medium))
+            FlowLayout(spacing: 6) {
+                ForEach(Self.examples, id: \.self) { example in
+                    Button(example) { add(example) }
+                        .controlSize(.small)
+                }
+            }
+            HStack {
+                Button("Clear", role: .destructive) { instructions = "" }
+                    .disabled(instructions.isEmpty)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private func add(_ line: String) {
+        let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        instructions = trimmed.isEmpty ? "- \(line)" : "\(trimmed)\n- \(line)"
+    }
+}
+
+/// Lays buttons out in rows that wrap.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].indices.isEmpty, rows[rows.count - 1].width + spacing + size.width > width {
+                let last = rows[rows.count - 1]
+                rows.append(Row(y: last.y + last.height + spacing))
+            }
+            var row = rows[rows.count - 1]
+            row.width += (row.indices.isEmpty ? 0 : spacing) + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows
     }
 }
