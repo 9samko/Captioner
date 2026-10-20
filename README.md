@@ -37,6 +37,11 @@ video file with the captions burned in.
   Paste that into Claude, copy its reply, and choose Paste Corrected Captions (⇧⌘V). Each `[n]`
   line replaces caption n's text and the timings stay as they were (word by word when the word
   count is unchanged). Undo Pasted Corrections puts the previous text back.
+- **Claude panel** (✨ in the toolbar, ⌥⌘K): a chat beside the caption list that runs Claude Code
+  (`claude -p`) on this Mac, so it uses your Claude plan and no API key. "Proofread All Captions"
+  sends every caption; the corrected lines are applied as they arrive (with Undo), and you can keep
+  asking for changes in plain words. Needs Claude Code installed and logged in (`claude auth login`);
+  the panel offers both. Tools, MCP servers and settings files are switched off for these chats.
 - The preview plays the video through the same compositor the export uses, so what you see is
   what you get. ⌥Space plays and pauses, ⌥⌘← / ⌥⌘→ skip 5 s.
 - **Export** (⌘E, or ⇧⌘E for every video) writes `<name> Captioned.mp4` next to the original
@@ -103,3 +108,11 @@ always-latest link). The EdDSA signing key is in the login keychain under the Sp
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## This fork
+
+- Automatic update checks are off: the update feed is the original app's, and its updates would
+  replace this version.
+- Builds are signed ad hoc, not notarized. On another Mac, unzip, move Captioner to Applications,
+  and either right-click › Open / System Settings › Privacy & Security › Open Anyway, or run
+  `xattr -dr com.apple.quarantine /Applications/Captioner.app`. Needs macOS 26.

@@ -40,6 +40,12 @@ struct AppCommands: Commands {
             Button("Rebuild Captions from Transcript") { selected?.rebuildCaptions() }
                 .disabled(!(selected?.hasEdits ?? false))
             Divider()
+            Button("Proofread with Claude") {
+                guard let selected else { return }
+                appState.showClaude = true
+                if selected.claude.setup == .ready { selected.claude.proofreadAll() }
+            }
+            .disabled(!canProofread || (selected?.claude.isRunning ?? true))
             Button("Copy Captions for Claude") { if let selected { TranscriptClipboard.copyPrompt(selected) } }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(!canProofread)
@@ -83,6 +89,8 @@ struct AppCommands: Commands {
         CommandGroup(after: .toolbar) {
             Button(appState.showInspector ? "Hide Inspector" : "Show Inspector") { appState.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
+            Button(appState.showClaude ? "Hide Claude" : "Show Claude") { appState.showClaude.toggle() }
+                .keyboardShortcut("k", modifiers: [.command, .option])
             Divider()
         }
     }

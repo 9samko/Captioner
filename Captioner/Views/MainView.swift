@@ -6,6 +6,7 @@ final class AppState {
     let player = PlayerController()
     var showInspector = true
     var showGallery = false
+    var showClaude = false
 }
 
 struct MainView: View {
@@ -104,6 +105,10 @@ struct MainView: View {
             }
             .disabled(!queue.items.contains { $0.hasCaptions && !$0.status.isBusy })
             .help("Export every video that has captions (⇧⌘E)")
+            Button { appState.showClaude.toggle() } label: {
+                Label("Claude", systemImage: "sparkles")
+            }
+            .help("Proofread and edit the captions with Claude (⌥⌘K)")
             Button { appState.showInspector.toggle() } label: {
                 Label("Inspector", systemImage: "sidebar.trailing")
             }
@@ -126,6 +131,11 @@ struct ItemDetailView: View {
                 Divider()
                 CaptionListView(item: item)
                     .frame(width: 320)
+                if appState.showClaude {
+                    Divider()
+                    ClaudeChatView(item: item)
+                        .frame(width: 340)
+                }
             }
         }
         .task(id: "\(item.id)-\(item.info == nil)") {

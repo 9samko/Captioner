@@ -101,14 +101,25 @@ nonisolated enum TranscriptExchange {
     /// blank lines and chatter around the lines are skipped.
     static func parse(_ pasted: String) -> [Int: String] {
         var corrections: [Int: String] = [:]
-        let normalized = pasted.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-        // `[n]`, then an optional `start – end` time range (any dash or arrow), then the text.
-        let linePattern = /\[(\d+)\]\s*(?:[\d:.,]+\s*[\-\u{2013}\u{2014}\u{2192}>]+\s*[\d:.,]+)?\s*(.*)/
-        for rawLine in normalized.split(separator: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard let match = line.wholeMatch(of: linePattern), let number = Int(match.1) else { continue }
-            corrections[number] = String(match.2).trimmingCharacters(in: .whitespaces)
+        for line in pasted.components(separatedBy: .newlines) {
+            if let (number, text) = captionLine(line) { corrections[number] = text }
         }
         return corrections
+    }
+
+    /// The text around the caption lines in a reply, without the lines or their code fences.
+    static func prose(_ reply: String) -> String {
+        reply.components(separatedBy: .newlines)
+            .filter { captionLine($0) == nil && !$0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `[n]`, then an optional `start – end` time range (any dash or arrow), then the text.
+    static func captionLine(_ line: String) -> (Int, String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let pattern = /\[(\d+)\]\s*(?:[\d:.,]+\s*[\-\u{2013}\u{2014}\u{2192}>]+\s*[\d:.,]+)?\s*(.*)/
+        guard let match = trimmed.wholeMatch(of: pattern), let number = Int(match.1) else { return nil }
+        return (number, String(match.2).trimmingCharacters(in: .whitespaces))
     }
 }

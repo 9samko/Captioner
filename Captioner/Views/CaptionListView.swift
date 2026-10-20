@@ -78,9 +78,16 @@ struct CaptionListView: View {
 /// Copy the captions out for proofreading and paste the corrected lines back.
 struct ProofreadMenu: View {
     let item: CaptionItem
+    @Environment(AppState.self) private var appState
 
     var body: some View {
         Menu {
+            Button("Proofread with Claude") {
+                appState.showClaude = true
+                if item.claude.setup == .ready { item.claude.proofreadAll() }
+            }
+            .disabled(item.claude.isRunning)
+            Divider()
             Button("Copy for Claude") { TranscriptClipboard.copyPrompt(item) }
             Button("Copy Captions with Timestamps") { TranscriptClipboard.copyLines(item) }
             Divider()

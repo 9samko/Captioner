@@ -27,6 +27,9 @@ final class AppUpdater: NSObject {
     override init() {
         super.init()
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        // This fork shares the original app's update feed; an automatic update would replace it
+        // with the original and lose the Claude features. Checking by hand still works.
+        controller.updater.automaticallyChecksForUpdates = false
         cancellable = controller.updater.publisher(for: \.canCheckForUpdates)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.canCheckForUpdates = $0 }

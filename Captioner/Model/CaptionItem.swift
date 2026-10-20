@@ -39,6 +39,8 @@ final class CaptionItem: Identifiable {
     let url: URL
     let asset: AVURLAsset
     let overlay: CaptionOverlay
+    /// The Claude conversation about these captions.
+    let claude = ClaudeChat()
 
     private(set) var info: CaptionComposition.VideoInfo?
     private(set) var composition: AVVideoComposition?
@@ -92,6 +94,7 @@ final class CaptionItem: Identifiable {
         textOptions = settings.textOptions
         overlay = CaptionOverlay(snapshot: RenderSnapshot(captions: [], style: settings.defaultStyle, placement: settings.placement,
                                                           textOptions: settings.textOptions, hold: settings.captionHold))
+        claude.item = self
     }
 
     var snapshot: RenderSnapshot {
