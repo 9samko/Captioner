@@ -22,6 +22,12 @@ struct CaptionListView: View {
                 Text("\(item.captions.count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                Button { appState.addCaption(to: item) } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .disabled(item.info == nil || item.isTranscribing)
+                .help("Add a caption at the playhead (⌘N)")
                 ProofreadMenu(item: item)
                 Toggle(isOn: $followPlayback) {
                     Image(systemName: "text.line.first.and.arrowtriangle.forward")
@@ -153,6 +159,7 @@ struct CaptionRow: View {
     let isCurrent: Bool
     let item: CaptionItem
     let onSeek: () -> Void
+    @Environment(AppState.self) private var appState
 
     @State private var text: String = ""
     @FocusState private var focused: Bool
@@ -187,6 +194,18 @@ struct CaptionRow: View {
                     }
                 }
             }
+            Button("Edit Text & Timing…") {
+                appState.captionDraft = CaptionDraft(captionID: caption.id, text: caption.text, start: caption.start, end: caption.end)
+            }
+            Button("Insert Caption After…") {
+                let span = item.suggestedSpan(at: caption.end + 0.05)
+                appState.captionDraft = CaptionDraft(start: span.start, end: span.end)
+            }
+            Divider()
+            Button("Set Start to Playhead") { item.setStart(of: caption.id, to: appState.player.currentTime) }
+            Button("Set End to Playhead") { item.setEnd(of: caption.id, to: appState.player.currentTime) }
+                .disabled(appState.player.currentTime <= caption.start)
+            Divider()
             Button("Merge with Next") { item.mergeWithNext(caption.id) }
                 .disabled(item.captions.last?.id == caption.id)
             Divider()
@@ -196,5 +215,95 @@ struct CaptionRow: View {
 
     private func commit() {
         item.updateText(of: caption.id, to: text)
+    }
+}
+
+/// Adds a caption or edits one's text and timing. Times take `M:SS.mmm`, `SS.s` or `H:MM:SS`.
+struct CaptionEditorSheet: View {
+    let item: CaptionItem
+    @State var draft: CaptionDraft
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+    @State private var startText = ""
+    @State private var endText = ""
+    @FocusState private var textFocused: Bool
+
+    private var player: PlayerController { appState.player }
+    private var start: TimeInterval? { TimeFormat.parse(startText) }
+    private var end: TimeInterval? { TimeFormat.parse(endText) }
+    private var isValid: Bool {
+        guard let start, let end else { return false }
+        return end > start && !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(draft.captionID == nil ? "Add Caption" : "Edit Caption")
+                .font(.title3.weight(.semibold))
+            TextField("What is said", text: $draft.text, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .focused($textFocused)
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                timeRow("Start", text: $startText)
+                timeRow("End", text: $endText)
+            }
+            if let start, let end, end <= start {
+                Text("The end must come after the start.")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            } else if draft.captionID == nil {
+                Text("Tip: put the playhead where the words begin, then use Playhead. Words share the time by length.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                if let id = draft.captionID {
+                    Button("Delete", role: .destructive) {
+                        item.delete(id)
+                        dismiss()
+                    }
+                }
+                Button("Play") { if let start { player.seek(to: start, thenPlay: true) } }
+                    .disabled(start == nil)
+                    .help("Play from the start time to check it")
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(draft.captionID == nil ? "Add" : "Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isValid)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+        .onAppear {
+            startText = TimeFormat.precise(draft.start)
+            endText = TimeFormat.precise(draft.end)
+            textFocused = true
+        }
+    }
+
+    private func timeRow(_ label: String, text: Binding<String>) -> some View {
+        GridRow {
+            Text(label)
+                .gridColumnAlignment(.trailing)
+            TextField(label, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospacedDigit())
+                .frame(width: 130)
+            Button("Playhead") { text.wrappedValue = TimeFormat.precise(player.currentTime) }
+                .help("Use the current playhead position")
+        }
+    }
+
+    private func save() {
+        guard let start, let end, isValid else { return }
+        if let id = draft.captionID {
+            item.editCaption(id, text: draft.text, start: start, end: end)
+        } else {
+            item.insertCaption(draft.text, start: start, end: end)
+        }
+        dismiss()
     }
 }

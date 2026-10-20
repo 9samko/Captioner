@@ -289,6 +289,45 @@ final class CaptionItem: Identifiable {
         beforeCorrections = nil
     }
 
+    /// Adds a caption by hand, such as words the recognizer missed. Its words share the span by
+    /// length, and they join the transcript so regrouping or restyling keeps them.
+    @discardableResult
+    func insertCaption(_ text: String, start: TimeInterval, end: TimeInterval) -> UUID? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, end > start else { return nil }
+        let caption = Caption(words: [TranscriptWord(text: trimmed, start: start, end: end)]).replacingText(trimmed)
+        captions = CaptionBuilder.normalized(captions + [caption])
+        rawWords = (rawWords + caption.words).sorted { $0.start < $1.start }
+        return caption.id
+    }
+
+    /// A span for a new caption at `time`: two seconds, cut short by the next caption or the end.
+    func suggestedSpan(at time: TimeInterval) -> (start: TimeInterval, end: TimeInterval) {
+        let start = max(0, min(time, max(duration - 0.5, 0)))
+        var end = start + 2
+        if let next = captions.first(where: { $0.start > start + 0.3 }) { end = min(end, next.start) }
+        if duration > 0 { end = min(end, duration) }
+        return (start, max(end, start + 0.3))
+    }
+
+    func editCaption(_ captionID: UUID, text: String, start: TimeInterval, end: TimeInterval) {
+        updateText(of: captionID, to: text)
+        guard let caption = captions.first(where: { $0.id == captionID }) else { return }
+        if end > start, abs(caption.start - start) > 0.001 || abs(caption.end - end) > 0.001 {
+            retime(captionID, start: start, end: end)
+        }
+    }
+
+    func setStart(of captionID: UUID, to time: TimeInterval) {
+        guard let caption = captions.first(where: { $0.id == captionID }) else { return }
+        retime(captionID, start: time, end: max(caption.end, time + 0.3))
+    }
+
+    func setEnd(of captionID: UUID, to time: TimeInterval) {
+        guard let caption = captions.first(where: { $0.id == captionID }), time > caption.start else { return }
+        retime(captionID, start: caption.start, end: time)
+    }
+
     func retime(_ captionID: UUID, start: TimeInterval, end: TimeInterval) {
         guard let index = captions.firstIndex(where: { $0.id == captionID }) else { return }
         captions[index] = captions[index].retimed(start: start, end: end)

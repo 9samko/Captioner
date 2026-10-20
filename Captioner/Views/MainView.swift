@@ -7,6 +7,23 @@ final class AppState {
     var showInspector = true
     var showGallery = false
     var showClaude = false
+    /// The caption being added or edited in the caption editor sheet.
+    var captionDraft: CaptionDraft?
+
+    /// Opens the editor for a new caption at the playhead.
+    func addCaption(to item: CaptionItem) {
+        let span = item.suggestedSpan(at: player.currentTime)
+        captionDraft = CaptionDraft(start: span.start, end: span.end)
+    }
+}
+
+struct CaptionDraft: Identifiable {
+    let id = UUID()
+    /// nil for a new caption.
+    var captionID: UUID?
+    var text = ""
+    var start: TimeInterval
+    var end: TimeInterval
 }
 
 struct MainView: View {
@@ -145,6 +162,9 @@ struct ItemDetailView: View {
         }
         .onDisappear {
             item.onRenderChange = nil
+        }
+        .sheet(item: Bindable(appState).captionDraft) { draft in
+            CaptionEditorSheet(item: item, draft: draft)
         }
     }
 }

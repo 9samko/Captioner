@@ -46,6 +46,10 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Captions") {
+            Button("Add Caption at Playhead…") { if let selected { appState.addCaption(to: selected) } }
+                .keyboardShortcut("n")
+                .disabled(selected == nil || selected?.info == nil || (selected?.isTranscribing ?? true))
+            Divider()
             Button("Generate Captions Again") { if let selected { queue.transcribeAgain(selected) } }
                 .disabled(selected == nil || (selected?.status.isBusy ?? true))
             Button("Rebuild Captions from Transcript") { selected?.rebuildCaptions() }
