@@ -1,40 +1,46 @@
 import Foundation
 
-/// Copies the captions out as timestamped lines and reads a corrected copy back in. Built for
-/// proofreading with an assistant such as Claude. Times are plain seconds, so no arithmetic on
-/// minutes is needed. A reply comes back in one of two shapes:
+/// Copies the captions out for proofreading with an assistant such as Claude, and reads the
+/// reply back in. Both directions are kept lean, since the whole transcript is sent each time:
 ///
-/// - Numbered lines change the text of those captions only, keeping their timing:
+/// - Out: `[n] start text` per caption, start in seconds. Pauses of `pauseMark` or more show as
+///   `(1.2s)`, and words the speech engine was unsure of are followed by `(?)`.
+/// - Back, inside a code block, either the complete new caption list as plain text, one caption
+///   per line (the app times every word by lining it up with the recognized words), or only the
+///   captions to change as `[n] text`. A line written `start–end text` is retimed to those times.
 ///
-///       [2] v dnešnom videu.
-///
-/// - Unnumbered timed lines are the complete new caption list, so captions can be regrouped,
-///   split, merged and retimed. Each word takes its timing from the recognized word it lines up
-///   with; a caption's own times win when they differ, so timing can be changed on purpose:
-///
-///       0.40 – 1.80 Dobrý deň, vitajte
-///       2.00 – 3.70 v dnešnom videu.
-///
-/// A reply can also suggest words for the speech engine to listen for (`Vocabulary: a; b`), which
-/// a second transcription uses to recognize names and terms correctly.
+/// A reply can also name words for the speech engine to listen for (`Vocabulary: a; b`).
 nonisolated enum TranscriptExchange {
     /// Below this the engine's confidence in a word is marked for the proofreader.
     static let lowConfidence = 0.5
+    /// Gaps between words at least this long are shown, so captions can break at pauses.
+    static let pauseMark: TimeInterval = 0.3
 
     // MARK: - Writing
 
-    /// `[n] start – end text`. With `wordTimes` each word is followed by `{start-end}`, and by
-    /// `{start-end?}` when the speech engine was unsure of it.
-    static func lines(for captions: [Caption], wordTimes: Bool = false) -> String {
-        captions.enumerated().map { index, caption in
-            let text = wordTimes ? caption.words.map(annotated).joined(separator: " ") : caption.text
-            return "[\(index + 1)] \(seconds(caption.start)) – \(seconds(caption.end)) \(text)"
+    /// `[n] start – end text` for people. With `compact`, the proofreading form: `[n] start text`
+    /// with pauses and unsure words marked.
+    static func lines(for captions: [Caption], compact: Bool = false) -> String {
+        var previousEnd: TimeInterval?
+        return captions.enumerated().map { index, caption in
+            guard compact else {
+                return "[\(index + 1)] \(TimeFormat.cue(caption.start)) – \(TimeFormat.cue(caption.end)) \(caption.text)"
+            }
+            var pieces: [String] = []
+            for word in caption.words {
+                if let previousEnd, word.start - previousEnd >= pauseMark, !pieces.isEmpty {
+                    pieces.append("(\(String(format: "%.1f", word.start - previousEnd))s)")
+                }
+                pieces.append((word.confidence ?? 1) < lowConfidence ? word.text + "(?)" : word.text)
+                previousEnd = word.end
+            }
+            // A pause before the caption shows in its start time; mark it too when it is long.
+            var line = "[\(index + 1)] \(seconds(caption.start)) "
+            if let gap = index > 0 ? caption.start - captions[index - 1].end : nil, gap >= pauseMark {
+                line += "(\(String(format: "%.1f", gap))s) "
+            }
+            return line + pieces.joined(separator: " ")
         }.joined(separator: "\n")
-    }
-
-    private static func annotated(_ word: TranscriptWord) -> String {
-        let unsure = (word.confidence ?? 1) < lowConfidence ? "?" : ""
-        return "\(word.text){\(seconds(word.start))-\(seconds(word.end))\(unsure)}"
     }
 
     static func seconds(_ time: TimeInterval) -> String { String(format: "%.2f", max(0, time)) }
@@ -43,60 +49,45 @@ nonisolated enum TranscriptExchange {
         Locale(identifier: "en").localizedString(forIdentifier: localeIdentifier) ?? localeIdentifier
     }
 
-    /// How long a caption may be, from the style, in words the model can follow.
     static func limits(_ grouping: CaptionGrouping) -> String {
         let characters = grouping.maxCharactersPerLine * max(grouping.maxLines, 1)
-        return "at most \(grouping.maxWords) words, about \(characters) characters and \(Int(grouping.maxDuration.rounded())) seconds"
+        return "at most \(grouping.maxWords) words, ~\(characters) characters, \(Int(grouping.maxDuration.rounded())) s"
     }
 
-    /// The format rules for a reply, shared by the copied prompt and the in-app chat.
+    /// How the captions are written and how to reply. Goes in the system prompt in the app, and
+    /// at the top of the copied prompt.
     static func formatRules(_ grouping: CaptionGrouping) -> String {
         """
-        How to reply (the app reads the reply, so this matters):
-        - To restructure (change where captions break, merge, split or retime them), give the \
-        complete new caption list, every caption from the first to the last, one per line as \
-        `start – end text`, with no [numbers] and no word times. Times are seconds with two decimals.
-        - A caption's start is the start of its first word and its end is the end of its last word, \
-        copied from the word times, unless you are asked to change the timing.
-        - Keep every word in the order it was spoken. The app lines your words up with the \
-        recognized ones to time them, so do not reorder, paraphrase or invent words.
-        - Each caption: \(limits(grouping)). Break at sentence ends first, then at commas, natural \
-        phrases and pauses (gaps between word times). Avoid ending a caption on a preposition or \
-        conjunction, and avoid one-word captions unless the word stands alone.
-        - To change only the text of a few captions, reply instead with just those lines as \
-        `[n] text`, using their numbers; the other captions stay as they are.
-        - Put the caption lines in a single code block.
-        - Words marked `?` in the word times are ones the speech engine was unsure of: check them \
-        hardest, using the context.
-        - After the code block, if the recognizer misheard names, places, brands or special terms, \
-        add one line `Vocabulary: term; term; …` with their correct spelling (at most 30). The app \
-        can transcribe the audio again listening for them. Leave the line out if there are none.
+        Input: one caption per line, `[n] start words`, start in seconds. `(1.2s)` marks a pause; \
+        `(?)` follows a word the speech engine was unsure of, so check those hardest.
+
+        Reply with caption lines in one code block, in one of these forms:
+        - Whole list (to re-cut or proofread everything): every caption in order, one per line, \
+        text only, no numbers or times. The app times each word from the recognition, so keep every \
+        word in spoken order; never reorder, paraphrase or invent words.
+        - A few captions: only those lines, as `[n] new text`.
+        - To retime a caption on purpose, write it as `start–end text` in seconds.
+        Captions: \(limits(grouping)). Break at sentence ends first, then commas, phrases and \
+        pauses. Don't end a caption on a preposition or conjunction; avoid one-word captions.
+        If names or terms were misheard, add after the block one line `Vocabulary: a; b` (max 30) \
+        so the engine can listen for them in a new transcription.
         """
     }
 
-    /// The captions with word times and proofreading instructions, ready to paste into a chat.
-    static func prompt(for captions: [Caption], localeIdentifier: String, grouping: CaptionGrouping) -> String {
+    /// The task, without the format rules (the app sends those as the system prompt).
+    static func task(localeIdentifier: String) -> String {
         let language = languageName(localeIdentifier)
         return """
-        Below is an automatic speech-to-text transcript of a video in \(language), already cut into \
-        on-screen captions. Each line is `[number] start – end words`, and every word carries its \
-        spoken time as {start-end} in seconds. The recognizer gets words, diacritics, capital \
-        letters and punctuation wrong, does not know where sentences end, and cuts captions badly.
-
-        Make it read as correct, natural written \(language), and cut it into good captions:
-        - Fix misheard or misspelled words, missing or wrong diacritics, and grammar.
-        - Add punctuation and capital letters, with real sentence boundaries. Capitalize names, \
-        places and brands correctly.
-        - Re-cut the captions so each one is a readable phrase that fits on screen.
-        - Keep what was said: no paraphrasing, summarizing or translating; drop only obvious \
-        recognition junk and stutters.
-
-        \(formatRules(grouping))
-
-        Reply with the complete new caption list.
-
-        \(lines(for: captions, wordTimes: true))
+        Proofread these \(language) speech-recognition captions into correct, natural written \
+        \(language): fix misheard words, diacritics, grammar, punctuation, capitals and sentence \
+        boundaries, and re-cut them into readable captions. Keep what was said; drop only \
+        recognition junk and stutters. Reply with the whole list.
         """
+    }
+
+    /// Everything in one message, for pasting into a chat outside the app.
+    static func prompt(for captions: [Caption], localeIdentifier: String, grouping: CaptionGrouping) -> String {
+        "\(task(localeIdentifier: localeIdentifier))\n\n\(formatRules(grouping))\n\n\(lines(for: captions, compact: true))"
     }
 
     // MARK: - Reading
@@ -124,20 +115,20 @@ nonisolated enum TranscriptExchange {
     }
 
     struct TimedLine {
-        var start: TimeInterval
-        var end: TimeInterval
+        var start: TimeInterval?
+        var end: TimeInterval?
         var text: String
     }
 
-    /// Applies a reply to `captions`: a complete timed list rebuilds them, numbered lines edit them.
+    /// Applies a reply to `captions`: a whole list rebuilds them, numbered lines edit them.
     static func apply(_ pasted: String, to captions: [Caption]) throws -> Result {
-        let timed = timedLines(pasted)
-        if !timed.isEmpty {
-            let rebuilt = rebuild(timed, from: captions)
-            let changed = countChanges(from: captions, to: rebuilt)
-            return Result(captions: rebuilt, changed: changed, matched: timed.count, restructured: true)
+        let reply = replyLines(pasted)
+        if !reply.list.isEmpty {
+            let rebuilt = rebuild(reply.list, from: captions)
+            return Result(captions: rebuilt, changed: countChanges(from: captions, to: rebuilt),
+                          matched: reply.list.count, restructured: true)
         }
-        let corrections = parse(pasted)
+        let corrections = reply.numbered
         guard !corrections.isEmpty else { throw ParseError.noLines }
         if let bad = corrections.keys.first(where: { $0 < 1 || $0 > captions.count }) {
             throw ParseError.outOfRange(bad, count: captions.count)
@@ -167,32 +158,53 @@ nonisolated enum TranscriptExchange {
         return Result(captions: result, changed: changed, matched: corrections.count, restructured: false)
     }
 
-    /// How many caption lines a reply holds, of either shape.
+    /// How many caption lines a reply holds, of either shape (also while it is still arriving).
     static func lineCount(_ reply: String) -> Int {
-        let timed = timedLines(reply).count
-        return timed > 0 ? timed : parse(reply).count
+        let lines = replyLines(reply)
+        return lines.list.isEmpty ? lines.numbered.count : lines.list.count
     }
 
-    /// Caption number → corrected text, from lines like `[12] text` (times and word times allowed).
-    static func parse(_ pasted: String) -> [Int: String] {
-        var corrections: [Int: String] = [:]
-        for line in pasted.components(separatedBy: .newlines) {
-            if let (number, text) = captionLine(line) { corrections[number] = text }
+    /// The caption lines of a reply. Inside a code block, numbered lines are edits and any other
+    /// line is part of a whole list; with no code block, only numbered and timed lines count.
+    static func replyLines(_ reply: String) -> (list: [TimedLine], numbered: [Int: String]) {
+        let all = reply.components(separatedBy: .newlines)
+        var block: [String] = []
+        var inBlock = false, sawBlock = false
+        for line in all {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                inBlock.toggle()
+                sawBlock = true
+                continue
+            }
+            if inBlock { block.append(line) }
         }
-        return corrections
+        let candidates = sawBlock ? block : all
+        var list: [TimedLine] = []
+        var numbered: [Int: String] = [:]
+        for line in candidates {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            if let (number, text) = captionLine(trimmed) {
+                numbered[number] = text
+            } else if let timed = timedLine(trimmed) {
+                list.append(timed)
+            } else if sawBlock {
+                list.append(TimedLine(start: nil, end: nil, text: clean(trimmed)))
+            }
+        }
+        return (list, numbered)
     }
 
-    /// Unnumbered `start – end text` lines, in order.
-    static func timedLines(_ reply: String) -> [TimedLine] {
-        reply.components(separatedBy: .newlines).compactMap(timedLine)
+    /// Caption number → corrected text, from lines like `[12] text`.
+    static func parse(_ pasted: String) -> [Int: String] {
+        replyLines(pasted).numbered
     }
 
     private static func timedLine(_ line: String) -> TimedLine? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
         let pattern = /(\d[\d:.,]*)\s*[\-\u{2013}\u{2014}\u{2192}>]+\s*(\d[\d:.,]*)\s*\|?\s*(.*)/
-        guard let match = trimmed.wholeMatch(of: pattern),
+        guard let match = line.wholeMatch(of: pattern),
               let start = TimeFormat.parse(String(match.1)), let end = TimeFormat.parse(String(match.2)) else { return nil }
-        return TimedLine(start: start, end: max(end, start), text: stripWordTimes(String(match.3)))
+        return TimedLine(start: start, end: max(end, start), text: clean(String(match.3)))
     }
 
     /// Terms from a `Vocabulary: a; b; c` line, for the speech engine to listen for.
@@ -208,29 +220,34 @@ nonisolated enum TranscriptExchange {
         return []
     }
 
-    /// The text around the caption lines in a reply, without the lines, their code fences or the
-    /// vocabulary line.
+    /// The text around the caption lines in a reply: no code blocks, caption lines or vocabulary.
     static func prose(_ reply: String) -> String {
-        reply.components(separatedBy: .newlines)
+        var inBlock = false
+        return reply.components(separatedBy: .newlines)
             .filter { line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                return captionLine(line) == nil && timedLine(line) == nil && !trimmed.hasPrefix("```")
+                if trimmed.hasPrefix("```") { inBlock.toggle(); return false }
+                return !inBlock && captionLine(trimmed) == nil && timedLine(trimmed) == nil
                     && !trimmed.replacingOccurrences(of: "**", with: "").lowercased().hasPrefix("vocabulary:")
             }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// `[n]`, then an optional `start – end` time range (any dash or arrow), then the text.
+    /// `[n]`, then an optional start time or `start – end` range, then the text.
     static func captionLine(_ line: String) -> (Int, String)? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let pattern = /\[(\d+)\]\s*(?:[\d:.,]+\s*[\-\u{2013}\u{2014}\u{2192}>]+\s*[\d:.,]+)?\s*(.*)/
+        let pattern = /\[(\d+)\]\s*(?:\d[\d:.,]*(?:\s*[\-\u{2013}\u{2014}\u{2192}>]+\s*\d[\d:.,]*)?\s)?\s*(.*)/
         guard let match = trimmed.wholeMatch(of: pattern), let number = Int(match.1) else { return nil }
-        return (number, stripWordTimes(String(match.2)))
+        return (number, clean(String(match.2)))
     }
 
-    private static func stripWordTimes(_ text: String) -> String {
-        text.replacing(/\{[^}]*\}/, with: "").trimmingCharacters(in: .whitespaces)
+    /// Drops markers copied back from the input: `(1.2s)`, `(?)`, `{…}` word times.
+    private static func clean(_ text: String) -> String {
+        text.replacing(/\{[^}]*\}/, with: "")
+            .replacing(/\(\d+(?:\.\d+)?s\)/, with: "")
+            .replacing("(?)", with: "")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     // MARK: - Rebuilding from a complete list
@@ -247,8 +264,9 @@ nonisolated enum TranscriptExchange {
             var caption = Caption(words: Array(timedWords[cursor..<(cursor + words.count)]))
             cursor += words.count
             let tolerance = 0.12
-            if line.end > line.start, abs(line.start - caption.start) > tolerance || abs(line.end - caption.end) > tolerance {
-                caption = caption.retimed(start: line.start, end: line.end)
+            if let start = line.start, let end = line.end, end > start,
+               abs(start - caption.start) > tolerance || abs(end - caption.end) > tolerance {
+                caption = caption.retimed(start: start, end: end)
             }
             result.append(caption)
         }

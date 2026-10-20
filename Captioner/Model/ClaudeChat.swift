@@ -71,8 +71,10 @@ final class ClaudeChat {
     func proofreadAll() {
         guard let item, item.hasCaptions else { return }
         newChat()
-        let prompt = TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier, grouping: item.style.grouping)
-        send(prompt, title: "Proofread all \(item.captions.count) captions", lines: TranscriptExchange.lines(for: item.captions, wordTimes: true))
+        // The format rules are in the system prompt; the message is just the task and the captions.
+        let lines = TranscriptExchange.lines(for: item.captions, compact: true)
+        let prompt = "\(TranscriptExchange.task(localeIdentifier: item.localeIdentifier))\n\n\(lines)"
+        send(prompt, title: "Proofread all \(item.captions.count) captions", lines: lines)
     }
 
     /// Adds Claude's suggested terms to the video's vocabulary and transcribes it again, so the
@@ -108,7 +110,7 @@ final class ClaudeChat {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let item else { return }
         draft = ""
-        let lines = TranscriptExchange.lines(for: item.captions, wordTimes: true)
+        let lines = TranscriptExchange.lines(for: item.captions, compact: true)
         var prompt = text
         if lines != sentLines, item.hasCaptions {
             let header = sessionID == nil ? "The captions:" : "The captions have changed since; here they are now:"
@@ -188,7 +190,10 @@ final class ClaudeChat {
             messages[index].canUndo = result.changed > 0
             // Claude's own reply is now what the captions say. If lines were deleted the numbers
             // moved, so send the captions again with the next message.
-            sentLines = item.captions.count == countBefore && !result.restructured ? TranscriptExchange.lines(for: item.captions, wordTimes: true) : nil
+            // Claude's reply is now what the captions say, so the next message needn't repeat them,
+            // unless the numbering moved under it (a deleted caption, or a list that came out shorter).
+            let inStep = result.restructured ? item.captions.count == result.matched : item.captions.count == countBefore
+            sentLines = inStep ? TranscriptExchange.lines(for: item.captions, compact: true) : nil
         } catch {
             messages.append(Message(role: .notice, text: error.localizedDescription))
         }
@@ -208,19 +213,16 @@ final class ClaudeChat {
     }
 
     static func systemPrompt(localeIdentifier: String, grouping: CaptionGrouping) -> String {
-        let language = TranscriptExchange.languageName(localeIdentifier)
-        return """
-        You are the caption editor built into Captioner, a Mac app that burns captions into videos. \
-        The captions come from Apple's on-device speech recognition in \(language). You get them as \
-        lines `[n] start – end words`, where every word carries its spoken time as {start-end} in \
-        seconds, marked `?` when the recognizer was unsure. You cannot hear the audio: the word \
-        times are how you see pauses and pace. Whatever you put in caption lines is applied to the \
-        video at once, and the user can undo it.
+        """
+        You edit captions in Captioner, a Mac app that burns captions into videos. They come from \
+        Apple's on-device speech recognition in \(TranscriptExchange.languageName(localeIdentifier)). \
+        You can't hear the audio; start times and pauses show the pacing. Caption lines you reply \
+        with are applied to the video at once (the user can undo).
 
         \(TranscriptExchange.formatRules(grouping))
 
-        Outside the code block keep it short, and answer in the language the user writes in. If the \
-        user only asks a question, answer without a code block.
+        Outside the code block be brief, in the user's language. Answer plain questions without a \
+        code block.
         """
     }
 }
