@@ -8,6 +8,7 @@ struct AppCommands: Commands {
 
     private var selected: CaptionItem? { queue.selected }
     private var player: PlayerController { appState.player }
+    private var canProofread: Bool { (selected?.hasCaptions ?? false) && !(selected?.isTranscribing ?? true) }
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -38,6 +39,17 @@ struct AppCommands: Commands {
                 .disabled(selected == nil || (selected?.status.isBusy ?? true))
             Button("Rebuild Captions from Transcript") { selected?.rebuildCaptions() }
                 .disabled(!(selected?.hasEdits ?? false))
+            Divider()
+            Button("Copy Captions for Claude") { if let selected { TranscriptClipboard.copyPrompt(selected) } }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(!canProofread)
+            Button("Copy Captions with Timestamps") { if let selected { TranscriptClipboard.copyLines(selected) } }
+                .disabled(!canProofread)
+            Button("Paste Corrected Captions") { if let selected { TranscriptClipboard.pasteCorrections(into: selected) } }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .disabled(!canProofread)
+            Button("Undo Pasted Corrections") { selected?.undoCorrections() }
+                .disabled(selected?.beforeCorrections == nil)
             Divider()
             Button("Caption Styles…") { appState.showGallery = true }
                 .keyboardShortcut("t", modifiers: [.command, .shift])

@@ -31,6 +31,12 @@ video file with the captions burned in.
 - **Editing**: the caption list beside the preview. Click a time to jump there, edit text in
   place (word timings are shared out again by length), right-click to split before a word, merge
   with the next caption or delete. "Rebuild from Transcript" regroups from the original words.
+- **Proofreading with Claude**: the ✓ menu above the caption list (or Captions › Copy Captions
+  for Claude, ⇧⌘C) copies every caption as a numbered line with its timestamps, with instructions
+  to fix words, diacritics, capitals, punctuation and sentence breaks in the video's language.
+  Paste that into Claude, copy its reply, and choose Paste Corrected Captions (⇧⌘V). Each `[n]`
+  line replaces caption n's text and the timings stay as they were (word by word when the word
+  count is unchanged). Undo Pasted Corrections puts the previous text back.
 - The preview plays the video through the same compositor the export uses, so what you see is
   what you get. ⌥Space plays and pauses, ⌥⌘← / ⌥⌘→ skip 5 s.
 - **Export** (⌘E, or ⇧⌘E for every video) writes `<name> Captioned.mp4` next to the original

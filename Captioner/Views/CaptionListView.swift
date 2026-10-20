@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The captions as an editable list. Click a time to jump there; edit the text in place.
@@ -21,6 +22,7 @@ struct CaptionListView: View {
                 Text("\(item.captions.count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                ProofreadMenu(item: item)
                 Toggle(isOn: $followPlayback) {
                     Image(systemName: "text.line.first.and.arrowtriangle.forward")
                 }
@@ -70,6 +72,71 @@ struct CaptionListView: View {
                 .padding(.vertical, 6)
             }
         }
+    }
+}
+
+/// Copy the captions out for proofreading and paste the corrected lines back.
+struct ProofreadMenu: View {
+    let item: CaptionItem
+
+    var body: some View {
+        Menu {
+            Button("Copy for Claude") { TranscriptClipboard.copyPrompt(item) }
+            Button("Copy Captions with Timestamps") { TranscriptClipboard.copyLines(item) }
+            Divider()
+            Button("Paste Corrections") { TranscriptClipboard.pasteCorrections(into: item) }
+            Button("Undo Pasted Corrections") { item.undoCorrections() }
+                .disabled(item.beforeCorrections == nil)
+        } label: {
+            Image(systemName: "text.badge.checkmark")
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .controlSize(.small)
+        .disabled(!item.hasCaptions || item.isTranscribing)
+        .help("Copy the captions with timestamps for proofreading, then paste the corrected lines back")
+    }
+}
+
+enum TranscriptClipboard {
+    /// The numbered lines with proofreading instructions in front.
+    static func copyPrompt(_ item: CaptionItem) {
+        copy(TranscriptExchange.prompt(for: item.captions, localeIdentifier: item.localeIdentifier))
+    }
+
+    static func copyLines(_ item: CaptionItem) {
+        copy(TranscriptExchange.lines(for: item.captions))
+    }
+
+    static func pasteCorrections(into item: CaptionItem) {
+        let pasted = NSPasteboard.general.string(forType: .string) ?? ""
+        let count = item.captions.count
+        do {
+            let result = try item.applyCorrections(pasted)
+            // Stay quiet when every line came back and something changed; explain anything else.
+            guard result.changed == 0 || result.matched < count else { return }
+            let alert = NSAlert()
+            if result.changed == 0 {
+                alert.messageText = "No Changes"
+                alert.informativeText = "The pasted lines match the captions as they are."
+            } else {
+                alert.messageText = "Some Lines Were Missing"
+                alert.informativeText = "\(result.matched) of \(count) lines were pasted, and \(result.changed) captions changed. Captions without a line were left as they were."
+            }
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Could Not Paste Corrections"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 

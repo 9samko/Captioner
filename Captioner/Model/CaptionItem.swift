@@ -67,6 +67,8 @@ final class CaptionItem: Identifiable {
     }
     /// Set once the captions have been edited, so a style change stops regrouping them.
     var hasEdits = false
+    /// The captions and transcript as they were before the last pasted corrections, for undoing them.
+    private(set) var beforeCorrections: (captions: [Caption], rawWords: [TranscriptWord], hasEdits: Bool)?
     var exportProgress: Double = 0
     var exportedURL: URL?
 
@@ -219,6 +221,27 @@ final class CaptionItem: Identifiable {
     func delete(_ captionID: UUID) {
         captions.removeAll { $0.id == captionID }
         hasEdits = true
+    }
+
+    /// Applies a corrected copy of the lines from `TranscriptExchange`. The corrected words become
+    /// the transcript too, so changing the style regroups the corrected text, not the original.
+    @discardableResult
+    func applyCorrections(_ pasted: String) throws -> TranscriptExchange.Result {
+        let result = try TranscriptExchange.apply(pasted, to: captions)
+        guard result.changed > 0 else { return result }
+        beforeCorrections = (captions, rawWords, hasEdits)
+        captions = CaptionBuilder.normalized(result.captions)
+        rawWords = captions.flatMap(\.words)
+        hasEdits = false
+        return result
+    }
+
+    func undoCorrections() {
+        guard let before = beforeCorrections else { return }
+        captions = before.captions
+        rawWords = before.rawWords
+        hasEdits = before.hasEdits
+        beforeCorrections = nil
     }
 
     func retime(_ captionID: UUID, start: TimeInterval, end: TimeInterval) {
